@@ -135,26 +135,52 @@ def deepseek_chat(message, history):
     
     if (len(filepath) > 0):
         file_url = f"file={filepath}"
-        response_text = response_text + f"\n[点击访问]({file_url})"
+    else:
+        file_url = ""
     
-    return response_text
-
-def gradio_chat_interface(message, history):
-    response = deepseek_chat(message, history)
-    return response
+    return response_text, file_url 
 
 
-# 创建 Gradio 界面
-chatbot = gr.ChatInterface(
-    fn=gradio_chat_interface,
-    title="AI生成原型工具",
-    description="你可以完整的描述需要的内容和交互的动作，他将会生成一个HTML文件，注意打开文件时，请新建窗口或tab打开，我现在还没有找到怎么解决。",
-    examples=[
-        ["请帮我写一个hello world"],
-        ["你能做什么?"],
-        ["Can you tell me a joke?"]
-    ]
-)
+with gr.Blocks(fill_height=True) as demo_chatbot:
+    htmlcode = "<H2>示例</H2>"
+    
+    with gr.Row():
+        with gr.Column(scale=1, min_width=300):
+            title = gr.Markdown("""
+                                # AI生成原型工具
+                                - 你可以完整的描述需要的内容和交互的动作，他将会生成一个HTML文件，注意打开文件时，会新建窗口或tab打开。
+                                """)
+            chatbot = gr.Chatbot()
+            msg = gr.Textbox(label="需求")
+            submit_button = gr.Button("提交")
+        with gr.Column(scale=2, min_width=600):
+            html = gr.HTML(htmlcode)
+    with gr.Accordion("清除和配置在下面", open=False):
+        clear = gr.ClearButton([msg, chatbot, html])
+    
+    real_history = []
+    
+    def clear_real_history():
+        real_history.clear()
+
+    def respond(message, chat_history):
+        
+        response_text, file_url = deepseek_chat(message, real_history)
+        
+        if len(file_url) > 0:
+            response_text_to_chatbot = gr.HTML(f"""
+                            <a href='{file_url}' target="_blank">点击这里查看</a>
+                            """)
+        else:
+            response_text_to_chatbot = response_text
+        
+        chat_history.append((message, response_text_to_chatbot))
+        real_history.append((message, response_text))
+        return "", chat_history,f'<iframe src="{file_url}" width="100%" height="800"></iframe>'
+
+    submit_button.click(respond, [msg, chatbot], [msg, chatbot, html])
+    clear.click(clear_real_history)
+    
 
 if __name__ == "__main__":
-    chatbot.launch(allowed_paths=["generated_htmls"], share=True)
+    demo_chatbot.launch(allowed_paths=["generated_htmls"], share=False)
