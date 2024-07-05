@@ -10,7 +10,7 @@ os.makedirs(dir_name, exist_ok=True)
 
 # 设置 DeepSeek API 密钥和基础 URL
 client = OpenAI(
-        api_key="sk-c51170da9e174a858289c3752a384638",
+        api_key="sk-db2c4dc7b8ff4a2aade0e9e059c47ed1",
         base_url="https://api.deepseek.com/v1",
     )
 
@@ -183,4 +183,4 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
     
 
 if __name__ == "__main__":
-    demo_chatbot.launch(allowed_paths=["generated_htmls"], share=False)
+    demo_chatbot.queue(max_size=2).launch(allowed_paths=["generated_htmls"], share=True)
