@@ -10,14 +10,14 @@ os.makedirs(dir_name, exist_ok=True)
 
 # 设置 DeepSeek API 密钥和基础 URL
 # client = OpenAI(
-#         api_key="sk-db2c4dc7b8ff4a2aade0e9e059c47ed1",
+#         api_key="Replace with your own API key",
 #         base_url="https://api.deepseek.com/v1",
 #     )
 
 # model_name = "deepseek-coder"
 
 client = OpenAI(
-        api_key="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",
+        api_key="Replace with your own API key",
         base_url="https://openrouter.ai/api/v1",
     )
 
