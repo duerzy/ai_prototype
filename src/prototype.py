@@ -9,12 +9,22 @@ dir_name = "generated_htmls"
 os.makedirs(dir_name, exist_ok=True)
 
 # 设置 DeepSeek API 密钥和基础 URL
+# client = OpenAI(
+#         api_key="sk-db2c4dc7b8ff4a2aade0e9e059c47ed1",
+#         base_url="https://api.deepseek.com/v1",
+#     )
+
+# model_name = "deepseek-coder"
+
 client = OpenAI(
-        api_key="sk-db2c4dc7b8ff4a2aade0e9e059c47ed1",
-        base_url="https://api.deepseek.com/v1",
+        api_key="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",
+        base_url="https://openrouter.ai/api/v1",
     )
 
-model_name = "deepseek-coder"
+model_name = "openai/gpt-4o-mini"
+
+
+
 
 def extract_code(text):
     pattern = r"```html\n((?:.*\n)*?)```"
@@ -102,7 +112,7 @@ def deepseek_chat(message, history):
         result = client.chat.completions.create(
             model=model_name,
             messages=messages,
-            max_tokens=2048,
+            max_tokens=16000,
             temperature=0.7,
             stream=False
         )
@@ -138,7 +148,7 @@ def deepseek_chat(message, history):
     else:
         file_url = ""
     
-    return response_text, file_url 
+    return response_text, file_url, code
 
 
 with gr.Blocks(fill_height=True) as demo_chatbot:
@@ -154,9 +164,12 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
             msg = gr.Textbox(label="需求")
             submit_button = gr.Button("提交")
         with gr.Column(scale=2, min_width=600):
-            html = gr.HTML(htmlcode)
+            with gr.Tab("预览"):
+                html = gr.HTML(htmlcode)
+            with gr.Tab("源码"):
+                source = gr.TextArea(label="Source Code",lines=26,max_lines=26)
     with gr.Accordion("清除和配置在下面", open=False):
-        clear = gr.ClearButton([msg, chatbot, html])
+        clear = gr.ClearButton([msg, chatbot, html, source])
     
     real_history = []
     
@@ -165,7 +178,7 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
 
     def respond(message, chat_history):
         
-        response_text, file_url = deepseek_chat(message, real_history)
+        response_text, file_url, code= deepseek_chat(message, real_history)
         
         if len(file_url) > 0:
             response_text_to_chatbot = gr.HTML(f"""
@@ -176,11 +189,11 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
         
         chat_history.append((message, response_text_to_chatbot))
         real_history.append((message, response_text))
-        return "", chat_history,f'<iframe src="{file_url}" width="100%" height="800"></iframe>'
+        return "", chat_history,f'<iframe src="{file_url}" width="100%" height="800"></iframe>',code
 
-    submit_button.click(respond, [msg, chatbot], [msg, chatbot, html])
+    submit_button.click(respond, [msg, chatbot], [msg, chatbot, html ,source])
     clear.click(clear_real_history)
     
 
 if __name__ == "__main__":
-    demo_chatbot.queue(max_size=2).launch(allowed_paths=["generated_htmls"], share=True)
+    demo_chatbot.queue(max_size=2).launch(allowed_paths=["generated_htmls"], share=False)
