@@ -1,0 +1,2 @@
+# ai_prototype
+使用LLM和Gradio搭建的通过对话生成前端原型的工具
