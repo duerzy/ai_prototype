@@ -186,6 +186,9 @@ def summarize(request_msg, last_code):
     return summary
 
 with gr.Blocks(fill_height=True) as demo_chatbot:
+    # 使用 gr.State 来存储版本信息
+    versions_state = gr.State([])
+    
     htmlcode = "<H2>示例</H2>"
     
     with gr.Row():
@@ -197,6 +200,7 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
             chatbot = gr.Chatbot()
             submit_button = gr.Button("提交")
             msg = gr.Textbox(label="需求")
+            version_dropdown = gr.Dropdown(label="版本选择", choices=[], interactive=True)
         with gr.Column(scale=2, min_width=600):
             with gr.Tab("预览"):
                 html = gr.HTML(htmlcode)
@@ -213,7 +217,7 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
     def clear_real_history():
         real_history.clear()
 
-    def respond(message, chat_history):
+    def respond(message, chat_history, versions):
         response_text, file_url, code = deepseek_chat(message, real_history)
         
         if len(file_url) > 0:
@@ -229,11 +233,28 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
         # 更新 request_msg
         updated_request_msg = "\n".join([f" {user}" for user, assistant in real_history])
         
-        return "", chat_history, f'<iframe src="{file_url}" width="100%" height="600"></iframe>', code, updated_request_msg
+        # 添加新版本到 versions 列表
+        versions.append({"filepath": file_url.split("=")[1], "code": code})
+        
+        # 更新版本下拉菜单
+        version_choices = [f"版本 {i+1}" for i in range(len(versions))]
+        
+        
+        return "", chat_history, f'<iframe src="{file_url}" width="100%" height="600"></iframe>', code, updated_request_msg, gr.Dropdown(choices=version_choices, value=version_choices[-1]), versions
 
-    submit_button.click(respond, [msg, chatbot], [msg, chatbot, html, source, request_msg])
-    clear.click(clear_real_history)
-    
+    submit_button.click(respond, [msg, chatbot, versions_state], [msg, chatbot, html, source, request_msg, version_dropdown, versions_state])
+
+    def update_preview(version, versions):
+        if not version:
+            return None, None
+        
+        index = int(version.split()[-1]) - 1
+        selected_version = versions[index]
+        
+        return f'<iframe src="file={selected_version["filepath"]}" width="100%" height="600"></iframe>', selected_version["code"]
+
+    version_dropdown.change(update_preview, inputs=[version_dropdown, versions_state], outputs=[html, source])
+
     def generate_summary(request_msg, last_code):
         summary = summarize(request_msg, last_code)
         return summary
