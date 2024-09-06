@@ -1,6 +1,7 @@
 import gradio as gr
 from openai import OpenAI
 import re,os,uuid
+from dotenv import load_dotenv
 
 # 目录名称
 dir_name = "generated_htmls"
@@ -8,22 +9,26 @@ dir_name = "generated_htmls"
 # 创建一个存放生成HTML文件的目录
 os.makedirs(dir_name, exist_ok=True)
 
+# 加载.env文件中的环境变量
+load_dotenv()
+
+# 从环境变量获取API密钥
+api_key = os.getenv('DEEPSEEK_API_KEY')
+
 # 设置 DeepSeek API 密钥和基础 URL
-# client = OpenAI(
-#         api_key="Replace with your own API key",
-#         base_url="https://api.deepseek.com/v1",
-#     )
-
-# model_name = "deepseek-coder"
-
 client = OpenAI(
-        api_key="Replace with your own API key",
-        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+        base_url="https://api.deepseek.com/beta",
     )
 
-model_name = "openai/gpt-4o-mini"
+model_name = "deepseek-coder"
 
+# client = OpenAI(
+#         api_key="Replace with your own API key",
+#         base_url="https://openrouter.ai/api/v1",
+#     )
 
+# model_name = "openai/gpt-4o-mini"
 
 
 def extract_code(text):
@@ -82,7 +87,7 @@ def merge_response(text_a, text_b):
         
 sys_prompt = """
 你是一名优秀的前端工程师，你会使用HTML + CSS + JavaScript来构建一个网页，你会使用外部的一些前端库，例如jQuery来进行一些展示上的优化。你将根据我的需求，为我写出一个HTML文件。请注意，只需要输出代码，不需要在代码之前回答任何“我可以”“当然可以”之类的回复。
-在代码后，也不需要对代码进行任何解释。注意，需求中涉及到了表格，不要生成空白的表格，生成一些演示数据，以方便进行操作。
+在代码后，也不需要对代码进行任何解释。注意，需求中涉及到了表格，不要生成空白的表格，生成一些演示数据，以方便进行操作。示例中的文字尽量使用中文。
 """
 
 
@@ -112,7 +117,7 @@ def deepseek_chat(message, history):
         result = client.chat.completions.create(
             model=model_name,
             messages=messages,
-            max_tokens=16000,
+            max_tokens=8192,
             temperature=0.7,
             stream=False
         )
@@ -151,6 +156,35 @@ def deepseek_chat(message, history):
     return response_text, file_url, code
 
 
+def summarize(request_msg, last_code):
+    summary_prompt = f"""
+    请根据以下的对话历史和最后生成的HTML代码，对整个需求进行总结：
+
+    对话历史：
+    {request_msg}
+
+    最后生成的HTML代码：
+    {last_code}
+
+    请提供一个简洁的总结，包括主要需求点和实现的功能。请注意，由于对话历史是由多轮对话组成的，其中有一些是修正生成代码的一些问题的，请注意进行识别提取最终的要求。
+    """
+
+    messages = [
+        {"role": "system", "content": "你是一个优秀的需求分析师，善于总结和提炼关键信息。"},
+        {"role": "user", "content": summary_prompt}
+    ]
+
+    result = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        max_tokens=8192,
+        temperature=0.7,
+        stream=False
+    )
+
+    summary = result.choices[0].message.content
+    return summary
+
 with gr.Blocks(fill_height=True) as demo_chatbot:
     htmlcode = "<H2>示例</H2>"
     
@@ -161,14 +195,17 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
                                 - 你可以完整的描述需要的内容和交互的动作，他将会生成一个HTML文件，注意打开文件时，会新建窗口或tab打开。
                                 """)
             chatbot = gr.Chatbot()
-            msg = gr.Textbox(label="需求")
             submit_button = gr.Button("提交")
+            msg = gr.Textbox(label="需求")
         with gr.Column(scale=2, min_width=600):
             with gr.Tab("预览"):
                 html = gr.HTML(htmlcode)
             with gr.Tab("源码"):
-                source = gr.TextArea(label="Source Code",lines=26,max_lines=26)
+                source = gr.TextArea(label="Source Code",lines=26,max_lines=26,show_copy_button=True)
     with gr.Accordion("清除和配置在下面", open=False):
+        request_msg = gr.Textbox(label="需求过程")
+        summary_button = gr.Button("进行需求总结")
+        summary_msg = gr.Textbox(label="需求总结")
         clear = gr.ClearButton([msg, chatbot, html, source])
     
     real_history = []
@@ -177,8 +214,7 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
         real_history.clear()
 
     def respond(message, chat_history):
-        
-        response_text, file_url, code= deepseek_chat(message, real_history)
+        response_text, file_url, code = deepseek_chat(message, real_history)
         
         if len(file_url) > 0:
             response_text_to_chatbot = gr.HTML(f"""
@@ -189,11 +225,20 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
         
         chat_history.append((message, response_text_to_chatbot))
         real_history.append((message, response_text))
-        return "", chat_history,f'<iframe src="{file_url}" width="100%" height="800"></iframe>',code
+        
+        # 更新 request_msg
+        updated_request_msg = "\n".join([f" {user}" for user, assistant in real_history])
+        
+        return "", chat_history, f'<iframe src="{file_url}" width="100%" height="600"></iframe>', code, updated_request_msg
 
-    submit_button.click(respond, [msg, chatbot], [msg, chatbot, html ,source])
+    submit_button.click(respond, [msg, chatbot], [msg, chatbot, html, source, request_msg])
     clear.click(clear_real_history)
     
+    def generate_summary(request_msg, last_code):
+        summary = summarize(request_msg, last_code)
+        return summary
+
+    summary_button.click(generate_summary, inputs=[request_msg, source], outputs=summary_msg)
 
 if __name__ == "__main__":
     demo_chatbot.queue(max_size=2).launch(allowed_paths=["generated_htmls"], share=False)
