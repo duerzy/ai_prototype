@@ -210,6 +210,8 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
         request_msg = gr.Textbox(label="需求过程")
         summary_button = gr.Button("进行需求总结")
         summary_msg = gr.Textbox(label="需求总结")
+        export_button = gr.Button("导出总结和源码")
+        exported_file = gr.File(label="导出的文件", visible=False)
         clear = gr.ClearButton([msg, chatbot, html, source])
     
     real_history = []
@@ -261,5 +263,52 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
 
     summary_button.click(generate_summary, inputs=[request_msg, source], outputs=summary_msg)
 
+
+    def add_summary_to_html(summary, html_code):
+        # 查找<body>标签的位置
+        body_start = html_code.find("<body")
+        if body_start == -1:
+            # 如果没有找到<body>标签,就在开头插入
+            return f"""
+            <div style="background-color: #f0f0f0; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
+                <h2>需求总结</h2>
+                <p>{summary}</p>
+            </div>
+            {html_code}
+            """
+        else:
+            # 找到<body>标签后的">"
+            body_end = html_code.find(">", body_start)
+            if body_end == -1:
+                body_end = body_start + 5  # 如果没有找到">",就假设它在"<body"后面
+
+            # 在<body>标签后插入总结
+            return f"""{html_code[:body_end + 1]}
+            <div style="background-color: #f0f0f0; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
+                <h2>需求总结</h2>
+                <p>{summary}</p>
+            </div>
+            {html_code[body_end + 1:]}
+        """
+
+    def export_summary_and_source(summary, source_code):
+        updated_code = add_summary_to_html(summary, source_code)
+        export_filename = f"summary_and_source_{uuid.uuid4()}.html"
+        export_filepath = os.path.join("generated_htmls", export_filename)
+        
+        with open(export_filepath, "w", encoding="utf-8") as f:
+            f.write(updated_code)
+        
+        return export_filepath
+
+    def handle_export(summary, source_code):
+        filepath = export_summary_and_source(summary, source_code)
+        return gr.File(value=filepath, visible=True)
+
+    export_button.click(handle_export, 
+                        inputs=[summary_msg, source], 
+                        outputs=[exported_file])
+
+    
 if __name__ == "__main__":
     demo_chatbot.queue(max_size=2).launch(allowed_paths=["generated_htmls"], share=False)
