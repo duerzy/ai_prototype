@@ -2,6 +2,7 @@ import gradio as gr
 from openai import OpenAI
 import re,os,uuid
 from dotenv import load_dotenv
+import markdown2
 
 # 目录名称
 dir_name = "generated_htmls"
@@ -166,7 +167,9 @@ def summarize(request_msg, last_code):
     最后生成的HTML代码：
     {last_code}
 
-    请提供一个简洁的总结，包括主要需求点和实现的功能。请注意，由于对话历史是由多轮对话组成的，其中有一些是修正生成代码的一些问题的，请注意进行识别提取最终的要求。
+    请提供一个简洁的总结，包括主要需求点和实现的功能。
+    请注意：由于对话历史是由多轮对话组成的，其中有一些是修正生成代码的一些问题的，请注意进行识别提取最终的要求。
+    请注意：使用markdown格式输出
     """
 
     messages = [
@@ -183,6 +186,14 @@ def summarize(request_msg, last_code):
     )
 
     summary = result.choices[0].message.content
+
+     # 清理summary，移除Markdown代码块标记
+    summary = summary.strip()
+    if summary.startswith("```markdown"):
+        summary = summary[len("```markdown"):].strip()
+    if summary.endswith("```"):
+        summary = summary[:-3].strip()
+
     return summary
 
 with gr.Blocks(fill_height=True) as demo_chatbot:
@@ -196,6 +207,7 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
             title = gr.Markdown("""
                                 # AI生成原型工具
                                 - 你可以完整的描述需要的内容和交互的动作，他将会生成一个HTML文件，注意打开文件时，会新建窗口或tab打开。
+                                - 在完成后，可以在页面的下方，进行需求总结和源码的导出。
                                 """)
             chatbot = gr.Chatbot()
             submit_button = gr.Button("提交")
@@ -206,7 +218,7 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
                 html = gr.HTML(htmlcode)
             with gr.Tab("源码"):
                 source = gr.TextArea(label="Source Code",lines=26,max_lines=26,show_copy_button=True)
-    with gr.Accordion("清除和配置在下面", open=False):
+    with gr.Accordion("更多的功能在下面", open=False):
         request_msg = gr.Textbox(label="需求过程")
         summary_button = gr.Button("进行需求总结")
         summary_msg = gr.Textbox(label="需求总结")
@@ -265,31 +277,82 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
 
 
     def add_summary_to_html(summary, html_code):
+        # 使用额外选项将Markdown格式的总结转换为HTML
+        summary_html = markdown2.markdown(summary, extras=["break-on-newline"])
+        
+        # 添加CSS样式和JavaScript来实现折叠功能
+        collapsible_summary = f"""
+        <style>
+            .summary-content {{
+                background-color: #f0f0f0;
+                padding: 15px;
+                margin-bottom: 20px;
+                border-radius: 5px;
+            }}
+            .summary-content ul, .summary-content ol {{
+                padding-left: 20px;
+            }}
+            .summary-content li {{
+                margin-bottom: 5px;
+            }}
+            .collapsible {{
+                background-color: #777;
+                color: white;
+                cursor: pointer;
+                padding: 18px;
+                width: 100%;
+                border: none;
+                text-align: left;
+                outline: none;
+                font-size: 15px;
+            }}
+            .active, .collapsible:hover {{
+                background-color: #555;
+            }}
+            .content {{
+                padding: 0 18px;
+                display: none;
+                overflow: hidden;
+                background-color: #f1f1f1;
+            }}
+        </style>
+        <button type="button" class="collapsible">点击展开/收起需求总结</button>
+        <div class="content">
+            <div class="summary-content">
+                {summary_html}
+            </div>
+        </div>
+        <script>
+        var coll = document.getElementsByClassName("collapsible");
+        var i;
+
+        for (i = 0; i < coll.length; i++) {{
+            coll[i].addEventListener("click", function() {{
+                this.classList.toggle("active");
+                var content = this.nextElementSibling;
+                if (content.style.display === "block") {{
+                    content.style.display = "none";
+                }} else {{
+                    content.style.display = "block";
+                }}
+            }});
+        }}
+        </script>
+        """
+        
         # 查找<body>标签的位置
         body_start = html_code.find("<body")
         if body_start == -1:
             # 如果没有找到<body>标签,就在开头插入
-            return f"""
-            <div style="background-color: #f0f0f0; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
-                <h2>需求总结</h2>
-                <p>{summary}</p>
-            </div>
-            {html_code}
-            """
+            return collapsible_summary + html_code
         else:
             # 找到<body>标签后的">"
             body_end = html_code.find(">", body_start)
             if body_end == -1:
                 body_end = body_start + 5  # 如果没有找到">",就假设它在"<body"后面
 
-            # 在<body>标签后插入总结
-            return f"""{html_code[:body_end + 1]}
-            <div style="background-color: #f0f0f0; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
-                <h2>需求总结</h2>
-                <p>{summary}</p>
-            </div>
-            {html_code[body_end + 1:]}
-        """
+            # 在<body>标签后插入可折叠的总结
+            return f"{html_code[:body_end + 1]}{collapsible_summary}{html_code[body_end + 1:]}"
 
     def export_summary_and_source(summary, source_code):
         updated_code = add_summary_to_html(summary, source_code)
