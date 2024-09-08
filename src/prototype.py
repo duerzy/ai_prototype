@@ -36,7 +36,7 @@ def extract_code(text):
     pattern = r"```html\n((?:.*\n)*?)```"
     code_blocks = re.findall(pattern, text, re.DOTALL)
     code =  "\n\n".join(code_blocks)
-    # 去掉code中的“```html”
+    # 去掉code中的"```html"
     code = code.replace("```html\n", "")
     return code
 
@@ -113,48 +113,40 @@ def deepseek_chat(message, history):
     messages.append({"role": "user", "content": message})
     
     response = ""
+    code = ""
+    file_url = ""
     
     while True:
-        result = client.chat.completions.create(
+        for chunk in client.chat.completions.create(
             model=model_name,
             messages=messages,
             max_tokens=8192,
             temperature=0.7,
-            stream=False
-        )
+            stream=True
+        ):
+            if chunk.choices[0].delta.content is not None:
+                content = chunk.choices[0].delta.content
+                response += content
+                yield response, file_url, code
         
-        print(result.choices[0].finish_reason)
+        # 提取代码并保存到文件
+        new_code = extract_code(response)
+        if new_code:
+            code = new_code
+            filepath = save_code_to_file(code)
+            if filepath:
+                file_url = f"file={filepath}"
         
-        message = result.choices[0].message.content
-        
-        # 如果是第二次及以后的内容，去掉message开头的```html\n
-        if len(response) > 0:
-            if message.startswith("```html\n"):
-                message = message[len("```html\n"):]
-        
-        response = merge_response(response, message)
-        
-        if result.choices[0].finish_reason == "stop":
-            # 模型认为生成已完成
-            break
+        # 检查是否需要继续生成
+        if "```" in response and response.count("```") % 2 == 0:
+            break  # 代码块已完整，退出循环
         else:
-            # 响应不完整,将已生成的内容添加到prompt,继续生成
-            messages.append({"role": "assistant", "content": message})
+            # 添加"请继续"的消息
+            messages.append({"role": "assistant", "content": response})
             messages.append({"role": "user", "content": "请继续"})
+            response += "\n"  # 添加换行符以分隔新的内容
     
-    
-    response_text = response
-    
-    # 提取代码并保存到文件
-    code = extract_code(response_text)
-    filepath = save_code_to_file(code)
-    
-    if (len(filepath) > 0):
-        file_url = f"file={filepath}"
-    else:
-        file_url = ""
-    
-    return response_text, file_url, code
+    yield response, file_url, code
 
 
 def summarize(request_msg, last_code):
@@ -177,24 +169,27 @@ def summarize(request_msg, last_code):
         {"role": "user", "content": summary_prompt}
     ]
 
-    result = client.chat.completions.create(
+    summary = ""
+    for chunk in client.chat.completions.create(
         model=model_name,
         messages=messages,
         max_tokens=8192,
         temperature=0.7,
-        stream=False
-    )
+        stream=True
+    ):
+        if chunk.choices[0].delta.content is not None:
+            content = chunk.choices[0].delta.content
+            summary += content
+            yield summary
 
-    summary = result.choices[0].message.content
-
-     # 清理summary，移除Markdown代码块标记
+    # 清理summary，移除Markdown代码块标记
     summary = summary.strip()
     if summary.startswith("```markdown"):
         summary = summary[len("```markdown"):].strip()
     if summary.endswith("```"):
         summary = summary[:-3].strip()
 
-    return summary
+    yield summary
 
 with gr.Blocks(fill_height=True) as demo_chatbot:
     # 使用 gr.State 来存储版本信息
@@ -232,29 +227,38 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
         real_history.clear()
 
     def respond(message, chat_history, versions):
-        response_text, file_url, code = deepseek_chat(message, real_history)
+        bot = deepseek_chat(message, real_history)
+        response_text = ""
+        file_url = ""
+        code = ""
         
-        if len(file_url) > 0:
-            response_text_to_chatbot = gr.HTML(f"""
-                            <a href='{file_url}' target="_blank">点击这里查看</a>
-                            """)
-        else:
-            response_text_to_chatbot = response_text
+        # 添加用户消息到聊天历史
+        chat_history.append((message, None))
         
-        chat_history.append((message, response_text_to_chatbot))
+        for response_text, file_url, code in bot:            
+            # 更新最后一条消息的回复
+            chat_history[-1] = (message, response_text)
+            
+            yield "", chat_history, "", "", "", gr.Dropdown(choices=[]), versions
+
         real_history.append((message, response_text))
         
         # 更新 request_msg
         updated_request_msg = "\n".join([f" {user}" for user, assistant in real_history])
         
         # 添加新版本到 versions 列表
-        versions.append({"filepath": file_url.split("=")[1], "code": code})
+        if file_url:
+            versions.append({"filepath": file_url.split("=")[1], "code": code})
+            response_text_to_chatbot = gr.HTML(f"""
+                                <a href='{file_url}' target="_blank">点击在新窗口查看</a>
+                                """)
+            # 更新最后一条消息的回复
+            chat_history[-1] = (message, response_text_to_chatbot)
         
         # 更新版本下拉菜单
         version_choices = [f"版本 {i+1}" for i in range(len(versions))]
         
-        
-        return "", chat_history, f'<iframe src="{file_url}" width="100%" height="600"></iframe>', code, updated_request_msg, gr.Dropdown(choices=version_choices, value=version_choices[-1]), versions
+        yield "", chat_history, f'<iframe src="{file_url}" width="100%" height="600"></iframe>', code, updated_request_msg, gr.Dropdown(choices=version_choices, value=version_choices[-1] if version_choices else None), versions
 
     submit_button.click(respond, [msg, chatbot, versions_state], [msg, chatbot, html, source, request_msg, version_dropdown, versions_state])
 
@@ -270,8 +274,9 @@ with gr.Blocks(fill_height=True) as demo_chatbot:
     version_dropdown.change(update_preview, inputs=[version_dropdown, versions_state], outputs=[html, source])
 
     def generate_summary(request_msg, last_code):
-        summary = summarize(request_msg, last_code)
-        return summary
+        summary_generator = summarize(request_msg, last_code)
+        for summary in summary_generator:
+            yield summary
 
     summary_button.click(generate_summary, inputs=[request_msg, source], outputs=summary_msg)
 
